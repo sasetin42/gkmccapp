@@ -1,0 +1,249 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * @description Grants access to user profiles, accessible only to the member or admins.
+     * @path /users/{userId}
+     * @allow (get, update, delete) if isOwner(userId) || isAdmin()
+     * @allow (list) if false
+     * @allow (create) if isSelfCreation(userId)
+     * @deny (get, list, update, delete, create) if !isSignedIn()
+     * @principle Enforces document ownership and admin override for user profiles.
+     */
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow list: if false;
+      allow create: if isSignedIn() && isSelfCreation(userId);
+      allow update: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow delete: if isSignedIn() && (isOwner(userId) || isAdmin()) && resource != null;
+
+      // Self creation is allowed when the user ID matches auth ID
+      function isSelfCreation(userId) {
+        return request.auth.uid == userId;
+      }
+    }
+
+    /**
+     * @description Grants access to members data, accessible to signed-in users for read operations, and admins for write operations.
+     * @path /members/{memberId}
+     * @allow (get, list) if isSignedIn()
+     * @allow (create, update, delete) if isSignedIn() && isAdmin()
+     * @principle Allows signed-in users to view members, and restricts write access to admins.
+     */
+    match /members/{memberId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isAdmin();
+      allow update: if isSignedIn() && isAdmin();
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    /**
+     * @description Grants access to event details, publicly readable but write-protected for admins and ministry leaders.
+     * @path /events/{eventId}
+     * @allow (get, list) if true
+     * @allow (create, update, delete) if isAdmin()
+     * @deny (create, update, delete) if !isSignedIn()
+     * @principle Allows public read access but restricts write access to admins.
+     */
+    match /events/{eventId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isSignedIn() && isAdmin();
+      allow update: if isSignedIn() && isAdmin();
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    /**
+     * @description Grants access to event registrations, publicly writable, readable by event organizers/admins.
+     * @path /events/{eventId}/registrations/{registrationId}
+     * @allow (get, list) if isAdmin()
+     * @allow (create) if isSignedIn()
+     * @allow (update, delete) if isAdmin()
+     * @deny (create) if !isSignedIn()
+     * @principle Allows public registration but restricts read access to admins.
+     */
+    match /events/{eventId}/registrations/{registrationId} {
+      allow get: if isSignedIn() && isAdmin();
+      allow list: if false;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && isAdmin();
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    /**
+     * @description Grants access to ministry data, accessible to ministry leaders and members.
+     * @path /ministries/{ministryId}
+     * @allow (get) if true
+     * @allow (list) if isSignedIn()
+     * @allow (create, update, delete) if isSignedIn() && (isMinistryLeader(ministryId) || isAdmin())
+     * @deny (create, update, delete) if !isSignedIn()
+     * @principle Restricts write access to ministry leaders and admins, and list access to signed-in users.
+     */
+    match /ministries/{ministryId} {
+      allow get: if true;
+      allow list: if isSignedIn(); // Secured list operations
+      allow create: if isSignedIn() && (isMinistryLeader(ministryId) || isAdmin());
+      allow update: if isSignedIn() && (isMinistryLeader(ministryId) || isAdmin());
+      allow delete: if isSignedIn() && (isMinistryLeader(ministryId) || isAdmin());
+    }
+
+    /**
+     * @description Grants access to donation records, accessible to the donating member and admins.
+     * @path /donations/{donationId}
+     * @allow (get, update, delete) if isDonationOwner(donationId) || isAdmin()
+     * @allow (create) if isSignedIn() && request.resource.data.donorId == request.auth.uid
+     * @deny (get, list, create, update, delete) if !isSignedIn()
+     * @principle Enforces donation ownership and admin override, and ensures donor ID matches authenticated user for creation.
+     */
+    match /donations/{donationId} {
+      allow get: if isSignedIn() && (isDonationOwner(donationId) || isAdmin());
+      allow list: if isSignedIn() && (isAdmin() || (request.query.hasAll(['where', 'orderBy']) && request.query.get('where')[0].field == 'donorId' && request.query.get('where')[0].operator == '==' && request.query.get('where')[0].value == request.auth.uid));
+      allow create: if isSignedIn() && (request.resource.data.donorId == request.auth.uid);
+      allow update: if isSignedIn() && (isDonationOwner(donationId) || isAdmin());
+      allow delete: if isSignedIn() && (isDonationOwner(donationId) || isAdmin()) && resource != null;
+    }
+
+    /**
+     * @description Grants access to church announcements, publicly readable but write-protected for admins.
+     * @path /announcements/{announcementId}
+     * @allow (get, list) if true
+     * @allow (create, update, delete) if isAdmin()
+     * @deny (create, update, delete) if !isSignedIn()
+     * @principle Allows public read access but restricts write access to admins.
+     */
+    match /announcements/{announcementId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isSignedIn() && isAdmin();
+      allow update: if isSignedIn() && isAdmin();
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    /**
+     * @description Grants access to family data, accessible to family members and admins.
+     * @path /families/{familyId}
+     * @allow (get, update, delete) if isSignedIn() && (isFamilyMember(familyId) || isAdmin())
+     * @allow (create) if isSignedIn() && isAdmin()
+     * @deny (get, list, create, update, delete) if !isSignedIn()
+     * @principle Restricts access to family members and admins, with creation limited to admins.
+     */
+    match /families/{familyId} {
+      allow get: if isSignedIn() && (isFamilyMember(familyId) || isAdmin());
+      allow list: if false;
+      allow create: if isSignedIn() && isAdmin(); // Secured family creation to admins.
+      allow update: if isSignedIn() && (isFamilyMember(familyId) || isAdmin());
+      allow delete: if isSignedIn() && (isFamilyMember(familyId) || isAdmin()) && resource != null;
+    }
+
+    /**
+     * @description Grants access to the church profile, publicly readable, write-protected for admins.
+     * @path /settings/churchProfile
+     * @allow get: if true
+     * @allow list: if false;
+     * @allow create, update, delete: if isSignedIn() && isAdmin() && resource != null;
+     * @principle Allows public read access but restricts write access to admins.
+     */
+    match /settings/churchProfile {
+      allow get: if true;
+      allow list: if false;
+      allow create: if isSignedIn() && isAdmin();
+      allow update: if isSignedIn() && isAdmin();
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    /**
+     * @description Grants access based on administrator roles. Existence of a document signifies admin status.
+     * @path /roles_admin/{userId}
+     * @allow (get, create, delete) if isSignedIn() && isOwner(userId)
+     * @allow (update) if false
+     * @deny (list) if true
+     * @principle Implements Database-Based Access Control (DBAC) for admin roles, allowing users to manage their own admin status.
+     */
+    match /roles_admin/{userId} {
+      allow get: if isSignedIn() && isOwner(userId);
+      allow list: if false;
+      allow create: if isSignedIn() && isOwner(userId); // Only allow creation of their own admin role.
+      allow update: if false;
+      allow delete: if isSignedIn() && isOwner(userId) && resource != null; // Only allow deletion of their own admin role.
+    }
+
+    /**
+     * @description Restricts access to activity logs.  Listing activity logs is prohibited.
+     * @path /activityLogs
+     * @deny get, list, create, update, delete: if true;
+     * @principle Denies all access to activity logs.
+     */
+    match /activityLogs {
+      allow get: if false;
+      allow list: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ---- Helper functions ----
+
+    /**
+     * @description Checks if the user is signed in.
+     * @returns {boolean} True if the user is signed in, false otherwise.
+     */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /**
+     * @description Checks if the user is the owner of the resource.
+     * @param {string} userId - The user ID to check against the request's auth UID.
+     * @returns {boolean} True if the user is the owner, false otherwise.
+     */
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    /**
+     * @description Checks if the user is an existing owner of the resource.
+     * @param {string} userId - The user ID to check against the resource's data.
+     * @returns {boolean} True if the user is the owner and the resource exists, false otherwise.
+     */
+    function isExistingOwner(userId) {
+      return isOwner(userId) && resource != null;
+    }
+
+    /**
+     * @description Checks if the user is an administrator.
+     * @returns {boolean} True if the user is an administrator, false otherwise.
+     */
+    function isAdmin() {
+      return exists(/databases/$(database)/documents/roles_admin/$(request.auth.uid));
+    }
+
+    /**
+     * @description Checks if the user is a ministry leader.
+     * @param {string} ministryId - The ID of the ministry.
+     * @returns {boolean} True if the user is a ministry leader, false otherwise.
+     */
+    function isMinistryLeader(ministryId) {
+      return get(/databases/$(database)/documents/ministries/$(ministryId)).data.leaderId == request.auth.uid;
+    }
+
+    /**
+     * @description Checks if the user is the owner of the donation.
+     * @param {string} donationId - The ID of the donation.
+     * @returns {boolean} True if the user is the donation owner, false otherwise.
+     */
+    function isDonationOwner(donationId) {
+      return get(/databases/$(database)/documents/donations/$(donationId)).data.donorId == request.auth.uid;
+    }
+
+     /**
+      * @description Checks if the user is a member of the family.
+      * @param {string} familyId - The ID of the family.
+      * @returns {boolean} True if the user is a family member, false otherwise.
+      */
+    function isFamilyMember(familyId) {
+        return request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberIds;
+    }
+  }
+}
